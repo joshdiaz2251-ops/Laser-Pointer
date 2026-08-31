@@ -1,0 +1,14 @@
+{
+  "name": "laser-pointer-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runs on your PC. Shows your friend's shared screen and lets you point on it.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-packager": "^17.1.2"
+  }
+}

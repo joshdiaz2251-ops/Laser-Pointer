@@ -29,48 +29,46 @@
   window.addEventListener("resize", resize);
   resize();
 
-  let dot = null; // {x, y} in CSS pixels, or null when hidden
+  const TRAIL_LENGTH = 10;
+  const TRAIL_FADE_MS = 250;
+  let trail = []; // [{x, y, t}], newest last
+  let visible = false;
 
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (dot) {
-      const { x, y } = dot;
 
-      // Soft glow
-      const glow = ctx.createRadialGradient(x, y, 0, x, y, 24);
-      glow.addColorStop(0, "rgba(255,40,40,0.55)");
-      glow.addColorStop(1, "rgba(255,40,40,0)");
-      ctx.fillStyle = glow;
+    const now = performance.now();
+    trail = trail.filter((p) => now - p.t < TRAIL_FADE_MS);
+
+    for (let i = 0; i < trail.length; i++) {
+      const p = trail[i];
+      const age = (now - p.t) / TRAIL_FADE_MS; // 0 = fresh, 1 = fully faded
+      const alpha = 1 - age;
+      const radius = 6 * (1 - age * 0.5);
+
+      ctx.fillStyle = `rgba(230,0,0,${alpha})`;
       ctx.beginPath();
-      ctx.arc(x, y, 24, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
       ctx.fill();
-
-      // Core dot
-      ctx.fillStyle = "rgba(255,30,30,0.95)";
-      ctx.beginPath();
-      ctx.arc(x, y, 7, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Ring
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(x, y, 10, 0, Math.PI * 2);
-      ctx.stroke();
     }
+
     requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);
 
   window.pointerBridge.onUpdate((payload) => {
     if (!payload || payload.visible === false) {
-      dot = null;
+      visible = false;
+      trail = [];
       return;
     }
-    dot = {
+    visible = true;
+    trail.push({
       x: payload.x * canvas.width,
       y: payload.y * canvas.height,
-    };
+      t: performance.now(),
+    });
+    if (trail.length > TRAIL_LENGTH) trail.shift();
   });
 </script>
 </body>

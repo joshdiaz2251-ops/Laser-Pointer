@@ -103,7 +103,7 @@
 
       let stream;
       try {
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       } catch (err) {
         setStatus("Screen share was cancelled. Click the button again to retry.", true);
         connectBtn.disabled = false;
