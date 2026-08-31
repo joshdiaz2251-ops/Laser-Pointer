@@ -144,6 +144,16 @@
         }
       });
 
+      pc.addEventListener("connectionstatechange", () => {
+        console.log("[viewer] connectionState:", pc.connectionState);
+        if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          setStatus("Connection " + pc.connectionState + " (ICE: " + pc.iceConnectionState + "). Click Connect to retry.", true);
+        }
+      });
+      pc.addEventListener("iceconnectionstatechange", () => {
+        console.log("[viewer] iceConnectionState:", pc.iceConnectionState);
+      });
+
       ws = new WebSocket(serverUrl);
 
       // Keep announcing "viewer-ready" every 2s until an offer arrives.
@@ -218,7 +228,13 @@
       dataChannel.send(JSON.stringify({ x: x / dispW, y: y / dispH, visible: true }));
     }
 
+    // Throttle to ~30 updates/sec — mousemove can fire far more often than
+    // that, which was just extra unnecessary network/render work.
+    let lastSendTime = 0;
     video.addEventListener("mousemove", (event) => {
+      const now = performance.now();
+      if (now - lastSendTime < 33) return;
+      lastSendTime = now;
       sendPointer(event.clientX, event.clientY);
     });
 

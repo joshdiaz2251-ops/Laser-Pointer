@@ -32,8 +32,11 @@
   const TRAIL_LENGTH = 10;
   const TRAIL_FADE_MS = 250;
   let trail = []; // [{x, y, t}], newest last
-  let visible = false;
+  let rafHandle = null;
 
+  // Only keep the animation loop running while there's something to draw.
+  // Redrawing a transparent overlay at 60fps forever (even with an empty
+  // canvas) was needlessly burning CPU/GPU on the host machine.
   function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -52,23 +55,31 @@
       ctx.fill();
     }
 
-    requestAnimationFrame(draw);
+    if (trail.length > 0) {
+      rafHandle = requestAnimationFrame(draw);
+    } else {
+      rafHandle = null;
+    }
   }
-  requestAnimationFrame(draw);
+
+  function ensureDrawing() {
+    if (rafHandle === null) {
+      rafHandle = requestAnimationFrame(draw);
+    }
+  }
 
   window.pointerBridge.onUpdate((payload) => {
     if (!payload || payload.visible === false) {
-      visible = false;
       trail = [];
       return;
     }
-    visible = true;
     trail.push({
       x: payload.x * canvas.width,
       y: payload.y * canvas.height,
       t: performance.now(),
     });
     if (trail.length > TRAIL_LENGTH) trail.shift();
+    ensureDrawing();
   });
 </script>
 </body>

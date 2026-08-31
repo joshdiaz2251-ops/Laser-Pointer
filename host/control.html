@@ -103,7 +103,20 @@
 
       let stream;
       try {
-        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        // Cap resolution/frame rate: pointing at a screen doesn't need 4K/60fps,
+        // and encoding that is what was burning CPU. 15fps at 1080p is plenty.
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: 1920, max: 1920 },
+            height: { ideal: 1080, max: 1080 },
+            frameRate: { ideal: 15, max: 15 },
+          },
+          audio: true,
+        });
+        const [videoTrack] = stream.getVideoTracks();
+        if (videoTrack && videoTrack.contentHint !== undefined) {
+          videoTrack.contentHint = "detail";
+        }
       } catch (err) {
         setStatus("Screen share was cancelled. Click the button again to retry.", true);
         connectBtn.disabled = false;
