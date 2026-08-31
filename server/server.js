@@ -49,8 +49,10 @@ wss.on("connection", (ws) => {
     }
 
     // Everything else (offer/answer/ice/pointer) just gets relayed
-    // to the other peer(s) in the same room.
-    broadcast(ws, raw);
+    // to the other peer(s) in the same room. Re-stringify (rather than
+    // forwarding the raw Buffer) so it goes out as a text frame — otherwise
+    // browsers receive a Blob instead of a JSON string and JSON.parse fails.
+    broadcast(ws, JSON.stringify(msg));
   });
 
   ws.on("close", () => leaveRoom(ws));

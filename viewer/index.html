@@ -70,10 +70,10 @@
     </p>
 
     <label>Signaling server URL</label>
-    <input id="serverUrl" value="ws://localhost:8080" />
+    <input id="serverUrl" value="wss://laser-pointer-c12c.onrender.com" />
 
     <label>Room code</label>
-    <input id="roomCode" placeholder="e.g. blue-otter-42" />
+    <input id="roomCode" placeholder="e.g. quiet-jumping-tiger" />
 
     <button id="connectBtn">Connect</button>
 
@@ -135,15 +135,27 @@
 
       ws = new WebSocket(serverUrl);
 
+      // Keep announcing "viewer-ready" every 2s until an offer arrives.
+      // The host may join the room a few seconds after us (it waits on the
+      // screen-share permission prompt first), so a single announcement can
+      // arrive before the host is listening and get lost forever.
+      let readyInterval = null;
+
       ws.addEventListener("open", () => {
         ws.send(JSON.stringify({ type: "join", room }));
-        ws.send(JSON.stringify({ type: "viewer-ready" }));
         setStatus("Waiting for host's screen share...");
+        readyInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "viewer-ready" }));
+          }
+        }, 2000);
+        ws.send(JSON.stringify({ type: "viewer-ready" }));
       });
 
       ws.addEventListener("message", async (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "offer") {
+          clearInterval(readyInterval);
           await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);

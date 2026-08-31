@@ -7,61 +7,83 @@
     font-family: system-ui, sans-serif;
     background: #111;
     color: #eee;
-    padding: 20px;
+    padding: 30px;
+    text-align: center;
   }
-  h2 { margin-top: 0; }
-  label { display: block; margin: 12px 0 4px; font-size: 13px; color: #aaa; }
-  input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 8px;
-    border-radius: 6px;
-    border: 1px solid #333;
-    background: #1b1b1b;
-    color: #eee;
+  h1 { font-size: 22px; margin-bottom: 8px; }
+  p.sub {
+    color: #999;
     font-size: 14px;
+    margin-bottom: 28px;
   }
   button {
-    margin-top: 16px;
     width: 100%;
-    padding: 10px;
+    padding: 22px;
     border: none;
-    border-radius: 6px;
+    border-radius: 12px;
     background: #d02c2c;
     color: white;
-    font-size: 15px;
+    font-size: 22px;
+    font-weight: bold;
     cursor: pointer;
   }
   button:disabled { background: #555; cursor: default; }
+  button:hover:not(:disabled) { background: #e63939; }
   #status {
-    margin-top: 16px;
-    font-size: 13px;
+    margin-top: 24px;
+    font-size: 16px;
     color: #9ad19a;
     white-space: pre-line;
+    line-height: 1.5;
   }
   #status.error { color: #ff8080; }
+  .step {
+    font-size: 40px;
+    margin-bottom: 10px;
+  }
+  #codeBox {
+    margin-bottom: 24px;
+    padding: 16px;
+    border-radius: 10px;
+    background: #1b1b1b;
+    border: 1px solid #333;
+  }
+  #codeBox .label {
+    font-size: 12px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  #codeValue {
+    font-size: 26px;
+    font-weight: bold;
+    color: #ffd166;
+    margin: 6px 0;
+    word-break: break-all;
+  }
 </style>
 </head>
 <body>
-  <h2>Laser Pointer — Host</h2>
-  <p style="color:#999; font-size: 13px;">
-    Run this on your own PC. Share the room code with your friend, then have
-    them open the viewer page and enter the same code.
-  </p>
+  <div class="step">🔴</div>
+  <h1>Share My Screen</h1>
+  <p class="sub">Click the big button, then pick your screen when Windows asks.</p>
 
-  <label>Signaling server URL</label>
-  <input id="serverUrl" value="ws://localhost:8080" />
+  <div id="codeBox">
+    <div class="label">Tell your friend this code</div>
+    <div id="codeValue"></div>
+  </div>
 
-  <label>Room code</label>
-  <input id="roomCode" placeholder="e.g. blue-otter-42" />
+  <button id="connectBtn">CLICK HERE TO START</button>
 
-  <button id="connectBtn">Share screen &amp; connect</button>
+  <div id="status">Ready. Just click the button above.</div>
 
-  <div id="status"></div>
-
+  <script src="wordlist.js"></script>
   <script>
-    const serverUrlInput = document.getElementById("serverUrl");
-    const roomCodeInput = document.getElementById("roomCode");
+    // Hardcoded so there is nothing for a non-technical user to type or get wrong.
+    const SERVER_URL = "wss://laser-pointer-c12c.onrender.com";
+    const ROOM_CODE = generateRoomCode();
+    document.getElementById("codeValue").textContent = ROOM_CODE;
+
     const connectBtn = document.getElementById("connectBtn");
     const statusEl = document.getElementById("status");
 
@@ -75,41 +97,37 @@
     let dataChannel = null;
 
     connectBtn.addEventListener("click", async () => {
-      const room = roomCodeInput.value.trim();
-      const serverUrl = serverUrlInput.value.trim();
-      if (!room) {
-        setStatus("Enter a room code first.", true);
-        return;
-      }
-
       connectBtn.disabled = true;
-      setStatus("Requesting screen share permission...");
+      connectBtn.textContent = "Starting...";
+      setStatus("A window will pop up asking which screen to share.\nPick your main screen and click Share.");
 
       let stream;
       try {
         stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       } catch (err) {
-        setStatus("Screen share was cancelled or failed: " + err.message, true);
+        setStatus("Screen share was cancelled. Click the button again to retry.", true);
         connectBtn.disabled = false;
+        connectBtn.textContent = "CLICK HERE TO START";
         return;
       }
 
-      setStatus("Connecting to signaling server...");
-      ws = new WebSocket(serverUrl);
+      setStatus("Connecting...");
+      ws = new WebSocket(SERVER_URL);
 
       ws.addEventListener("open", () => {
-        ws.send(JSON.stringify({ type: "join", room }));
-        setStatus("Waiting for viewer to join room \"" + room + "\"...");
+        ws.send(JSON.stringify({ type: "join", room: ROOM_CODE }));
+        setStatus("Waiting for your friend to connect...\n(This can take up to a minute the first time.)");
         startPeerConnection(stream);
       });
 
       ws.addEventListener("message", async (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "viewer-ready") {
-          await makeOffer();
+          if (pc.signalingState === "stable" && pc.connectionState !== "connected") {
+            await makeOffer();
+          }
         } else if (msg.type === "answer") {
           await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
-          setStatus("Connected. Move your mouse over the shared area on the viewer's page to point.");
         } else if (msg.type === "ice") {
           try {
             await pc.addIceCandidate(msg.candidate);
@@ -117,8 +135,16 @@
         }
       });
 
-      ws.addEventListener("close", () => setStatus("Signaling connection closed.", true));
-      ws.addEventListener("error", () => setStatus("Signaling connection error.", true));
+      ws.addEventListener("close", () => {
+        setStatus("Lost connection to the server. Click the button again to retry.", true);
+        connectBtn.disabled = false;
+        connectBtn.textContent = "CLICK HERE TO START";
+      });
+      ws.addEventListener("error", () => {
+        setStatus("Something went wrong connecting. Click the button again to retry.", true);
+        connectBtn.disabled = false;
+        connectBtn.textContent = "CLICK HERE TO START";
+      });
     });
 
     function startPeerConnection(stream) {
@@ -131,7 +157,6 @@
       }
 
       dataChannel = pc.createDataChannel("pointer");
-      dataChannel.addEventListener("open", () => setStatus("Data channel open."));
       dataChannel.addEventListener("message", (event) => {
         const payload = JSON.parse(event.data);
         window.pointerBridge.send(payload);
@@ -145,14 +170,19 @@
 
       pc.addEventListener("connectionstatechange", () => {
         if (pc.connectionState === "connected") {
-          setStatus("Connected. Your friend can now point on your screen.");
+          connectBtn.textContent = "CONNECTED ✓";
+          setStatus("You're all set! Your friend can now point on your screen.\nYou can minimize this window.");
         } else if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-          setStatus("Connection " + pc.connectionState + ".", true);
+          setStatus("Connection " + pc.connectionState + ". Click the button again to retry.", true);
+          connectBtn.disabled = false;
+          connectBtn.textContent = "CLICK HERE TO START";
         }
       });
 
       stream.getVideoTracks()[0].addEventListener("ended", () => {
-        setStatus("Screen sharing stopped.", true);
+        setStatus("Screen sharing stopped. Click the button again to restart.", true);
+        connectBtn.disabled = false;
+        connectBtn.textContent = "CLICK HERE TO START";
       });
     }
 
@@ -160,7 +190,6 @@
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       ws.send(JSON.stringify({ type: "offer", offer }));
-      setStatus("Offer sent, waiting for viewer to answer...");
     }
   </script>
 </body>
