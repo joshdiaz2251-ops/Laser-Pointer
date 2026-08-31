@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    background: #111;
+    color: #eee;
+    padding: 20px;
+  }
+  h2 { margin-top: 0; }
+  label { display: block; margin: 12px 0 4px; font-size: 13px; color: #aaa; }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #1b1b1b;
+    color: #eee;
+    font-size: 14px;
+  }
+  button {
+    margin-top: 16px;
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: #d02c2c;
+    color: white;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:disabled { background: #555; cursor: default; }
+  #status {
+    margin-top: 16px;
+    font-size: 13px;
+    color: #9ad19a;
+    white-space: pre-line;
+  }
+  #status.error { color: #ff8080; }
+</style>
+</head>
+<body>
+  <h2>Laser Pointer — Host</h2>
+  <p style="color:#999; font-size: 13px;">
+    Run this on your own PC. Share the room code with your friend, then have
+    them open the viewer page and enter the same code.
+  </p>
+
+  <label>Signaling server URL</label>
+  <input id="serverUrl" value="ws://localhost:8080" />
+
+  <label>Room code</label>
+  <input id="roomCode" placeholder="e.g. blue-otter-42" />
+
+  <button id="connectBtn">Share screen &amp; connect</button>
+
+  <div id="status"></div>
+
+  <script>
+    const serverUrlInput = document.getElementById("serverUrl");
+    const roomCodeInput = document.getElementById("roomCode");
+    const connectBtn = document.getElementById("connectBtn");
+    const statusEl = document.getElementById("status");
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.className = isError ? "error" : "";
+    }
+
+    let ws = null;
+    let pc = null;
+    let dataChannel = null;
+
+    connectBtn.addEventListener("click", async () => {
+      const room = roomCodeInput.value.trim();
+      const serverUrl = serverUrlInput.value.trim();
+      if (!room) {
+        setStatus("Enter a room code first.", true);
+        return;
+      }
+
+      connectBtn.disabled = true;
+      setStatus("Requesting screen share permission...");
+
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      } catch (err) {
+        setStatus("Screen share was cancelled or failed: " + err.message, true);
+        connectBtn.disabled = false;
+        return;
+      }
+
+      setStatus("Connecting to signaling server...");
+      ws = new WebSocket(serverUrl);
+
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ type: "join", room }));
+        setStatus("Waiting for viewer to join room \"" + room + "\"...");
+        startPeerConnection(stream);
+      });
+
+      ws.addEventListener("message", async (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "viewer-ready") {
+          await makeOffer();
+        } else if (msg.type === "answer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+          setStatus("Connected. Move your mouse over the shared area on the viewer's page to point.");
+        } else if (msg.type === "ice") {
+          try {
+            await pc.addIceCandidate(msg.candidate);
+          } catch {}
+        }
+      });
+
+      ws.addEventListener("close", () => setStatus("Signaling connection closed.", true));
+      ws.addEventListener("error", () => setStatus("Signaling connection error.", true));
+    });
+
+    function startPeerConnection(stream) {
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      for (const track of stream.getTracks()) {
+        pc.addTrack(track, stream);
+      }
+
+      dataChannel = pc.createDataChannel("pointer");
+      dataChannel.addEventListener("open", () => setStatus("Data channel open."));
+      dataChannel.addEventListener("message", (event) => {
+        const payload = JSON.parse(event.data);
+        window.pointerBridge.send(payload);
+      });
+
+      pc.addEventListener("icecandidate", (event) => {
+        if (event.candidate && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+        }
+      });
+
+      pc.addEventListener("connectionstatechange", () => {
+        if (pc.connectionState === "connected") {
+          setStatus("Connected. Your friend can now point on your screen.");
+        } else if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+          setStatus("Connection " + pc.connectionState + ".", true);
+        }
+      });
+
+      stream.getVideoTracks()[0].addEventListener("ended", () => {
+        setStatus("Screen sharing stopped.", true);
+      });
+    }
+
+    async function makeOffer() {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: "offer", offer }));
+      setStatus("Offer sent, waiting for viewer to answer...");
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  let dot = null; // {x, y} in CSS pixels, or null when hidden
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (dot) {
+      const { x, y } = dot;
+
+      // Soft glow
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, 24);
+      glow.addColorStop(0, "rgba(255,40,40,0.55)");
+      glow.addColorStop(1, "rgba(255,40,40,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(x, y, 24, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Core dot
+      ctx.fillStyle = "rgba(255,30,30,0.95)";
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ring
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
+  window.pointerBridge.onUpdate((payload) => {
+    if (!payload || payload.visible === false) {
+      dot = null;
+      return;
+    }
+    dot = {
+      x: payload.x * canvas.width,
+      y: payload.y * canvas.height,
+    };
+  });
+</script>
+</body>
+</html>

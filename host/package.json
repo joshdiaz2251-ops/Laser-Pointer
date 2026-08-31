@@ -1,0 +1,13 @@
+{
+  "name": "laser-pointer-host",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runs on your friend's PC. Shares the screen and shows a transparent overlay dot driven by your mouse.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

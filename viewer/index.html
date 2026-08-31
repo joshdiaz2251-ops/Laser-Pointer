@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Laser Pointer — Viewer</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    background: #111;
+    color: #eee;
+    margin: 0;
+    padding: 20px;
+  }
+  h2 { margin-top: 0; }
+  .panel { max-width: 480px; }
+  label { display: block; margin: 12px 0 4px; font-size: 13px; color: #aaa; }
+  input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #333;
+    background: #1b1b1b;
+    color: #eee;
+    font-size: 14px;
+  }
+  button {
+    margin-top: 16px;
+    width: 100%;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: #d02c2c;
+    color: white;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  button:disabled { background: #555; cursor: default; }
+  #status {
+    margin-top: 16px;
+    font-size: 13px;
+    color: #9ad19a;
+    white-space: pre-line;
+  }
+  #status.error { color: #ff8080; }
+  #videoWrap {
+    margin-top: 20px;
+    display: none;
+  }
+  video {
+    width: 100%;
+    background: black;
+    cursor: crosshair;
+    display: block;
+  }
+  .hint {
+    font-size: 12px;
+    color: #888;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <h2>Laser Pointer — Viewer</h2>
+    <p style="color:#999; font-size: 13px;">
+      Enter the same server URL and room code your friend gave you, then
+      connect. Once their screen appears below, move your mouse over it to
+      point on their screen.
+    </p>
+
+    <label>Signaling server URL</label>
+    <input id="serverUrl" value="ws://localhost:8080" />
+
+    <label>Room code</label>
+    <input id="roomCode" placeholder="e.g. blue-otter-42" />
+
+    <button id="connectBtn">Connect</button>
+
+    <div id="status"></div>
+  </div>
+
+  <div id="videoWrap">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <div class="hint">Move your mouse over the video to point. Move it off the video to hide the dot.</div>
+  </div>
+
+  <script>
+    const serverUrlInput = document.getElementById("serverUrl");
+    const roomCodeInput = document.getElementById("roomCode");
+    const connectBtn = document.getElementById("connectBtn");
+    const statusEl = document.getElementById("status");
+    const videoWrap = document.getElementById("videoWrap");
+    const video = document.getElementById("remoteVideo");
+
+    function setStatus(text, isError) {
+      statusEl.textContent = text;
+      statusEl.className = isError ? "error" : "";
+    }
+
+    let ws = null;
+    let pc = null;
+    let dataChannel = null;
+
+    connectBtn.addEventListener("click", () => {
+      const room = roomCodeInput.value.trim();
+      const serverUrl = serverUrlInput.value.trim();
+      if (!room) {
+        setStatus("Enter a room code first.", true);
+        return;
+      }
+
+      connectBtn.disabled = true;
+      setStatus("Connecting to signaling server...");
+
+      pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      pc.addEventListener("track", (event) => {
+        video.srcObject = event.streams[0];
+        videoWrap.style.display = "block";
+      });
+
+      pc.addEventListener("datachannel", (event) => {
+        dataChannel = event.channel;
+        dataChannel.addEventListener("open", () => setStatus("Connected. Move your mouse over the video to point."));
+      });
+
+      pc.addEventListener("icecandidate", (event) => {
+        if (event.candidate && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ice", candidate: event.candidate }));
+        }
+      });
+
+      ws = new WebSocket(serverUrl);
+
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ type: "join", room }));
+        ws.send(JSON.stringify({ type: "viewer-ready" }));
+        setStatus("Waiting for host's screen share...");
+      });
+
+      ws.addEventListener("message", async (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: "answer", answer }));
+        } else if (msg.type === "ice") {
+          try {
+            await pc.addIceCandidate(msg.candidate);
+          } catch {}
+        }
+      });
+
+      ws.addEventListener("close", () => setStatus("Signaling connection closed.", true));
+      ws.addEventListener("error", () => setStatus("Signaling connection error.", true));
+    });
+
+    // Send normalized pointer position over the data channel, accounting
+    // for letterboxing from object-fit / intrinsic video aspect ratio.
+    function sendPointer(clientX, clientY) {
+      if (!dataChannel || dataChannel.readyState !== "open") return;
+      const rect = video.getBoundingClientRect();
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      if (!vw || !vh) return;
+
+      const boxAspect = rect.width / rect.height;
+      const videoAspect = vw / vh;
+
+      let dispW = rect.width;
+      let dispH = rect.height;
+      let offsetX = 0;
+      let offsetY = 0;
+
+      if (videoAspect > boxAspect) {
+        dispH = rect.width / videoAspect;
+        offsetY = (rect.height - dispH) / 2;
+      } else {
+        dispW = rect.height * videoAspect;
+        offsetX = (rect.width - dispW) / 2;
+      }
+
+      const x = clientX - rect.left - offsetX;
+      const y = clientY - rect.top - offsetY;
+
+      if (x < 0 || y < 0 || x > dispW || y > dispH) {
+        dataChannel.send(JSON.stringify({ visible: false }));
+        return;
+      }
+
+      dataChannel.send(JSON.stringify({ x: x / dispW, y: y / dispH, visible: true }));
+    }
+
+    video.addEventListener("mousemove", (event) => {
+      sendPointer(event.clientX, event.clientY);
+    });
+
+    video.addEventListener("mouseleave", () => {
+      if (dataChannel && dataChannel.readyState === "open") {
+        dataChannel.send(JSON.stringify({ visible: false }));
+      }
+    });
+  </script>
+</body>
+</html>
